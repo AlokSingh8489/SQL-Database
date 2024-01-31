@@ -1,0 +1,161 @@
+create table fact_deliveries(
+	delivery_id character(30) not null,
+	delivery_date date not null,
+	delivery_status character(30) not null,
+	order_type character(30) not null,
+	total_amount float not null,
+	merchant_id character(30) not null,
+	merchant_rating float,
+	consumer_id character(30),
+    city_id character(30),
+    city_name character(30)
+
+);
+
+INSERT INTO fact_deliveries(delivery_id, delivery_date, delivery_status, order_type,
+                           total_amount, merchant_id, merchant_rating, consumer_id, city_id,
+                           city_name)
+VALUES 
+('D1', '2021-01-01', 'Placed', 'Delivery', 100.0, 'M1', null, 'C1', 'city1', 'San Francisco'),
+('D2', '2021-01-02', 'Placed', 'Pickup', 50.0, 'M2', 4.5, 'C2', 'city2', 'Los Angeles'),
+('D1', '2021-01-01', 'Completed', 'Delivery', 100.0, 'M1', 2.5, 'C1', 'city1', 'San Francisco'),
+('D2', '2021-01-02', 'Cancelled', 'Pickup', 50.0, 'M2', 4.5, 'C2', 'city2', 'Los Angeles'),
+('D3', '2021-02-02', 'Placed', 'Pickup', 150.0, 'M1', null, 'C1', 'city2', 'Los Angeles')
+
+;
+
+
+
+
+     
+
+
+--1->daily count of orders
+
+
+select delivery_date, count (  delivery_id) from  fact_deliveries 
+where 
+delivery_status !='Cancelled' 
+group by 1
+
+;
+
+--2-> Find DoD count of orders. 
+--date , todays order count,yesterday order count 
+
+select delivery_date, count (  delivery_id) ,lag( count (  delivery_id) ) over (order by delivery_date )  as previous_date_delivery,
+lag( count (  delivery_id) ,2) over (order by delivery_date )  as two_previous_date_delivery 
+ from  fact_deliveries 
+where 
+delivery_status !='Cancelled' 
+group by 1
+;
+
+
+select delivery_date,num_of_orders,lag (num_of_orders,1) over(delivery_date) as prevday_num from
+(
+select delivery_date, count (  delivery_id) as num_of_orders from  fact_deliveries 
+where 
+delivery_status !='Cancelled' 
+group by 1
+
+)
+;
+
+
+--daily count of orders across various cities
+
+select delivery_date, city_name,count (  delivery_id) as num_of_orders from  fact_deliveries 
+where 
+delivery_status !='Cancelled' 
+group by 1,2
+;
+--list of merchent ids with min 3 avg murchent rating
+
+select merchant_id, avg(merchant_rating)
+from fact_deliveries
+group by 1
+having avg(merchant_rating)>3;
+
+--merchent with highest rating
+--rank the ratings may give more rows in case of a tie
+
+select * from 
+(
+select merchant_id, rank () over(order by avg(merchant_rating) desc) as rating_rank , avg(merchant_rating)
+from fact_deliveries
+group by 1)
+where rating_rank=1
+;
+--another way
+select * from (
+select merchant_id, avg(merchant_rating)
+from fact_deliveries
+group by 1 order by 2 desc
+) limit 1
+;
+--another way
+select merchant_id from(
+select merchant_id,rating, row_number () over(order by rating desc) as rating_rank  from 
+(
+select merchant_id,  avg(merchant_rating) rating
+from fact_deliveries
+group by 1)
+)
+where rating_rank=1
+;
+
+
+
+--everycity merchent with highest avg rating
+
+select merchant_id, city_name from 
+(
+select merchant_id, city_name ,rating,row_number() over( partition by city_name  order by rating desc) as rank_in_city
+from (
+select merchant_id, city_name ,avg(merchant_rating) as rating from 
+fact_deliveries
+group by 1,2
+)
+)
+where rank_in_city=1
+
+;
+--merchent with max cancelled orders
+select merchant_id from (
+select merchant_id ,row_number() over(order by canst desc)  r from
+(
+select merchant_id,count(*)  canst from fact_deliveries where delivery_status='Cancelled' group by merchant_id
+)
+) where r=1
+;
+
+--max cancelled order each day
+
+select merchant_id from (
+select merchant_id ,row_number() over(order by canst desc)  r from
+(
+select merchant_id,delivery_date,count(*)  canst from fact_deliveries where delivery_status='Cancelled' group by merchant_id
+)
+) where r=1
+;
+
+
+
+--number of customers who have ordered frm top merchant that day. top merchent is merchent with max orders
+
+     select * from fact_deliveries;
+     
+
+with top_merchant as
+(
+select merchant_id ,delivery_date from
+(
+select row_number() over (order by numod desc) as cn  ,numod,merchant_Id ,delivery_date from (
+select count(distinct delivery_id) numod , merchant_id ,delivery_date from fact_deliveries group by merchant_id ,delivery_date 
+) ) where cn=1
+
+)
+
+select merchant_id,delivery_date,count (distinct consumer_id) from fact_deliveries inner join top_merchant on  fact_deliveries.merchant_id=top_merchant.merchant_id and fact_deliveries.delivery_date=top_merchant.delivery_date
+group by 1,2
