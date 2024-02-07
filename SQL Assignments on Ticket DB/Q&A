@@ -1,0 +1,177 @@
+
+--All questions below are on Ticket DB
+--https://docs.amazonaws.cn/en_us/redshift/latest/dg/c_sampledb.html
+
+--#number of tickets sold daily
+select sum(qtysold),dateid from sales group by 2 order by 2;
+--How many days were there where the number of tickets sold was less than 25% of the mean?
+with daily_sales as 
+(select sum(qtysold) qty,dateid from sales group by 2 order by 2)
+select count(dateid)  from daily_sales where qty<( (select cast( sum(qty) as real)  from daily_sales)  / (select count(dateid) from daily_sales)  )*.25
+;
+with daily_sales as 
+(select sum(qtysold) qty,dateid from sales group by 2 order by 2)
+select count(dateid)  from daily_sales where qty< (select avg(qty) *.25 from daily_sales)
+;
+
+--What was the percent change in orders between September 9 & 10?
+with ninth_order as 
+(select sum(qtysold) as ninethsales from sales where  dateid=(select dateid from date where caldate='2008-09-09'))
+,
+tenth_order as (
+select sum(qtysold) as tensales from sales where  dateid=(select dateid from date where caldate='2008-09-10')
+)
+
+select ( (select tensales from tenth_order ) - (select ninethsales from ninth_order ))/ (select cast(ninethsales as real) from ninth_order)*100
+
+
+
+
+
+		
+WITH sept9Sale AS 
+(
+		select cast(count(*) AS float) as qty 
+		from sales 
+		where date(saletime) = date('2008-09-09') 
+),
+		
+sept10Sale AS (
+		select Cast (count(*)  as float) as qty 
+		from sales 
+		where date(saletime) = date('2008-09-10') 
+		)
+select round((b.qty-a.qty)/a.qty*100.00 , 1) 
+from sept9Sale a, sept10Sale b;
+
+--
+
+--What was the top event in Los Angeles?
+--Note: Here top event means in terms of the overall price paid. 
+
+select eventname from event where eventid in (select eventid from sales where eventid in(select eventid from event where venueid in(select venueid from venue where venuecity='Los Angeles')) order by pricepaid desc
+)limit 1		
+
+
+
+--How many users have bought a ticket to the category called 'Musicals'?
+
+
+
+cal->event->sales
+select * from sales where listid in(
+select listid from listing where eventid in(
+select eventid from event where catid in(select catid from category where catname='Musicals')
+)
+)
+
+select count( distinct buyerid)
+ from sales where listid in(
+select listid from listing where eventid in(
+select eventid from event where catid in(select catid from category where catname='Musicals')
+)
+)
+
+
+--Which holiday had the most ticket sales?
+WITH a AS (
+
+select dateid,row_number() over (order by sl desc) rk from (
+    SELECT sum(qtysold) AS sl,
+           dateid
+      FROM sales
+     WHERE dateid IN (
+               SELECT dateid
+                 FROM date
+                WHERE holiday = 1
+           )
+     GROUP BY 2
+)
+)
+
+SELECT CALDATE FROM DATE WHERE DATEID =(SELECT dateid
+  FROM a
+ WHERE rk = 1);
+--How many users have bought tickets to an out-of-state event?
+
+
+
+
+
+SELECT COUNT(DISTINCT s.buyerid) AS out_of_state_buyers
+FROM sales s
+JOIN users u ON s.buyerid = u.userid
+JOIN event e ON s.eventid = e.eventid
+JOIN venue v ON e.venueid = v.venueid
+WHERE u.state <> v.venuestate;
+
+
+
+SELECT *
+FROM sales s
+JOIN users u ON s.buyerid = u.userid
+
+;
+--Find the top 3 cities for sales. 
+
+with top_cities as 
+(select venuecity, row_number() over  (order by ct desc) rn from
+(
+ SELECT count(salesid) ct,
+       venuecity
+  FROM venue v,
+       event e,
+       sales s
+ WHERE v.venueid = e.venueid AND 
+       s.eventid = e.eventid
+ GROUP BY 2
+ )
+ )
+select  venuecity from top_cities where rn<=3
+;
+
+
+
+
+--How many buyer pairs have attended three or more events together?
+
+	SELECT COUNT (*) AS total_pairs_attended_together
+    FROM (
+    	SELECT
+    	  s1.buyerid AS buyer_a,
+    	  s2.buyerid AS buyer_b,
+    	  COUNT(DISTINCT s1.eventid) AS num_events_attended_together
+    	FROM sales s1
+    	JOIN sales s2
+    	  ON s2.eventid = s1.eventid
+    	    AND s2.buyerid > s1.buyerid
+    	GROUP BY
+    	  buyer_a,
+    	  buyer_b
+    	HAVING num_events_attended_together >= 3
+    	)
+	;
+ 
+
+--How many tickets were sold by resellers (someone who bought tickets for an event and later sold tickets to that same event)?
+
+
+select sum(s2.qtysold)
+from sales s1 join sales s2
+on s1.eventid=s2.eventid
+and s1.buyerid=s2.sellerid
+AND s2.saletime > s1.saletime
+
+
+SELECT SUM(s2.qtysold) AS total_ticktes_resold
+	  FROM sales s1
+	  JOIN sales s2
+	    -- Two sales for the same event
+	    ON s2.eventid = s1.eventid
+	      -- The second transaction happened after the frist
+	      AND s2.saletime > s1.saletime
+	      -- The seller of the second transaction was the buyer in the first transaction
+	      -- This means they're reselling the tickets
+	      AND s2.sellerid = s1.buyerid
+
+
